@@ -18,6 +18,7 @@ type options struct {
 	} `positional-args:"yes"`
 
 	Staged                bool     `long:"staged" ini-name:"staged" env:"REVDIFF_STAGED" description:"show staged changes"`
+	PerCommit             bool     `long:"per-commit" ini-name:"per-commit" env:"REVDIFF_PER_COMMIT" description:"review a ref range one commit at a time; < and > move between commits"`
 	Untracked             bool     `long:"untracked" ini-name:"untracked" env:"REVDIFF_UNTRACKED" description:"show untracked files in the tree"`
 	TreeWidth             int      `long:"tree-width" ini-name:"tree-width" env:"REVDIFF_TREE_WIDTH" default:"2" description:"file tree panel width in units (1-10, default 2 of 10)"`
 	TabWidth              int      `long:"tab-width" ini-name:"tab-width" env:"REVDIFF_TAB_WIDTH" default:"4" description:"number of spaces per tab character"`
@@ -161,6 +162,10 @@ func parseArgs(args []string) (options, error) {
 
 	if len(opts.Include) > 0 && len(opts.Only) > 0 {
 		return options{}, errors.New("--include cannot be used with --only")
+	}
+
+	if err := validatePerCommitFlag(opts); err != nil {
+		return options{}, err
 	}
 
 	if opts.CompactContext <= 0 {

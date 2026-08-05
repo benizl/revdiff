@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 
 	"github.com/umputun/revdiff/app/annotation"
 	"github.com/umputun/revdiff/app/diff"
@@ -61,8 +62,18 @@ func preloadAnnotations(path string, store *annotation.Store, renderer ui.Render
 	if err != nil {
 		return err
 	}
+	p := newPreloader(store, renderer, ref, staged, untrackedFn, untrackedRenamesFn, workDir, warnOut)
+	return p.load(records)
+}
 
-	p := &preloader{
+// newPreloader builds a preloader for one ref. Its caches are ref-scoped, so a
+// caller validating records against several refs (per-commit review) needs one
+// preloader per ref rather than one shared instance.
+func newPreloader(store *annotation.Store, renderer ui.Renderer, ref string, staged bool,
+	untrackedFn func() ([]string, error), untrackedRenamesFn func([]string) ([]diff.FileEntry, error),
+	workDir string, warnOut io.Writer,
+) *preloader {
+	return &preloader{
 		store:              store,
 		renderer:           renderer,
 		ref:                ref,
@@ -74,7 +85,57 @@ func preloadAnnotations(path string, store *annotation.Store, renderer ui.Render
 		lineCache:          make(map[string]map[lineKey]struct{}),
 		renames:            make(map[string]string),
 	}
-	return p.load(records)
+}
+
+// preloadAnnotationsPerCommit is the per-commit counterpart of
+// preloadAnnotations. Records carry the commit their line numbers belong to, so
+// each group is validated against that commit's own diff. Records whose commit
+// is not part of the reviewed range have no diff to sit in and are dropped with a
+// warning; that includes records with no commit at all, which is what a file
+// written by a whole-range review looks like.
+func preloadAnnotationsPerCommit(path string, store *annotation.Store, renderer ui.Renderer, stops []ui.CommitStop,
+	untrackedFn func() ([]string, error), untrackedRenamesFn func([]string) ([]diff.FileEntry, error),
+	workDir string, warnOut io.Writer,
+) error {
+	records, err := readAnnotationsFile(path)
+	if err != nil {
+		return err
+	}
+
+	byCommit := make(map[string][]annotation.Annotation)
+	for _, a := range records {
+		byCommit[a.Commit] = append(byCommit[a.Commit], a)
+	}
+
+	for _, stop := range stops {
+		group := byCommit[stop.Hash]
+		delete(byCommit, stop.Hash)
+		if len(group) == 0 {
+			continue
+		}
+		// staged is always false here: --per-commit rejects --staged.
+		p := newPreloader(store, renderer, stop.Ref, false, untrackedFn, untrackedRenamesFn, workDir, warnOut)
+		p.store.SetCommit(stop.Hash)
+		if lerr := p.load(group); lerr != nil {
+			return lerr
+		}
+	}
+
+	unknown := make([]string, 0, len(byCommit))
+	for hash := range byCommit {
+		unknown = append(unknown, hash)
+	}
+	sort.Strings(unknown)
+	for _, hash := range unknown {
+		label := hash
+		if label == "" {
+			label = "(none)"
+		}
+		if warnOut != nil {
+			_, _ = fmt.Fprintf(warnOut, "warning: --annotations: commit %s not in reviewed range, dropping %d annotation(s)\n", label, len(byCommit[hash]))
+		}
+	}
+	return nil
 }
 
 // readAnnotationsFile rejects non-regular files (FIFO, device, anything that

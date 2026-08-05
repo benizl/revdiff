@@ -15,6 +15,7 @@ import (
 
 	"github.com/umputun/revdiff/app/annotation"
 	"github.com/umputun/revdiff/app/diff"
+	"github.com/umputun/revdiff/app/ui"
 	"github.com/umputun/revdiff/app/ui/mocks"
 )
 
@@ -383,4 +384,67 @@ func TestPreloadAnnotations_EmptyFile(t *testing.T) {
 	}
 	require.NoError(t, preloadAnnotations(path, store, r, "", false, nil, nil, "", &bytes.Buffer{}))
 	assert.Equal(t, 0, store.Count())
+}
+
+func TestPreloadAnnotationsPerCommit(t *testing.T) {
+	stops := []ui.CommitStop{
+		{Hash: "aaa111", Subject: "first", Ref: "aaa111^..aaa111"},
+		{Hash: "bbb222", Subject: "second", Ref: "bbb222^..bbb222"},
+	}
+	body := "# commit aaa111 first\n" +
+		"## a.go:5 (+) | added in first\n" +
+		"note one\n" +
+		"\n# commit bbb222 second\n" +
+		"## a.go:5 (+) | added in second\n" +
+		"note two\n" +
+		"\n# commit ccc333 not reviewed\n" +
+		"## a.go:5 (+)\n" +
+		"orphan\n"
+	path := writeTempAnnotations(t, body)
+
+	// each commit's diff has line 5 added, so both in-range records survive
+	r := &mocks.RendererMock{
+		ChangedFilesFunc: func(string, bool) ([]diff.FileEntry, error) {
+			return []diff.FileEntry{{Path: "a.go", Status: diff.FileModified}}, nil
+		},
+		FileDiffFunc: func(diff.FileDiffRequest) ([]diff.DiffLine, error) {
+			return []diff.DiffLine{{ChangeType: diff.ChangeAdd, NewNum: 5, Content: "x"}}, nil
+		},
+	}
+	store := annotation.NewStore()
+	warn := &bytes.Buffer{}
+	require.NoError(t, preloadAnnotationsPerCommit(path, store, r, stops, nil, nil, "", warn))
+
+	assert.Equal(t, 2, store.Count(), "records for reviewed commits are kept, the third is dropped")
+	assert.Contains(t, warn.String(), "commit ccc333 not in reviewed range")
+
+	store.SetCommit("aaa111")
+	require.Len(t, store.Get("a.go"), 1)
+	assert.Equal(t, "note one", store.Get("a.go")[0].Comment)
+	assert.Equal(t, "added in first", store.Get("a.go")[0].Anchor)
+
+	store.SetCommit("bbb222")
+	require.Len(t, store.Get("a.go"), 1)
+	assert.Equal(t, "note two", store.Get("a.go")[0].Comment)
+}
+
+func TestPreloadAnnotationsPerCommit_ValidatesAgainstEachCommitDiff(t *testing.T) {
+	stops := []ui.CommitStop{{Hash: "aaa111", Subject: "first", Ref: "aaa111^..aaa111"}}
+	path := writeTempAnnotations(t, "# commit aaa111 first\n## a.go:99 (+)\nout of range\n")
+
+	r := &mocks.RendererMock{
+		ChangedFilesFunc: func(ref string, staged bool) ([]diff.FileEntry, error) {
+			assert.Equal(t, "aaa111^..aaa111", ref, "validation uses the commit's own ref")
+			return []diff.FileEntry{{Path: "a.go", Status: diff.FileModified}}, nil
+		},
+		FileDiffFunc: func(diff.FileDiffRequest) ([]diff.DiffLine, error) {
+			return []diff.DiffLine{{ChangeType: diff.ChangeAdd, NewNum: 5, Content: "x"}}, nil
+		},
+	}
+	store := annotation.NewStore()
+	warn := &bytes.Buffer{}
+	require.NoError(t, preloadAnnotationsPerCommit(path, store, r, stops, nil, nil, "", warn))
+
+	assert.Equal(t, 0, store.Count())
+	assert.Contains(t, warn.String(), "a.go:99 (+) not in diff")
 }

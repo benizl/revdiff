@@ -2,6 +2,7 @@ package diff
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"regexp"
 	"strconv"
@@ -328,6 +329,17 @@ func (j *Jj) CommitLog(ref string) ([]CommitInfo, error) {
 		return nil, fmt.Errorf("commit log: %w", err)
 	}
 	return j.parseCommitLog(out), nil
+}
+
+// CommitScope implements CommitScoper for jujutsu. jj spells the first parent
+// as a trailing "-"; the root commit's parent is the virtual root(), so no
+// special case is needed.
+func (j *Jj) CommitScope(hash string) (string, error) {
+	hash = strings.TrimSpace(hash)
+	if hash == "" {
+		return "", errors.New("commit scope: empty hash")
+	}
+	return hash + "-.." + hash, nil
 }
 
 // commitLogRevset translates a combined ref string to jj's revset syntax for

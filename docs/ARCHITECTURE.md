@@ -425,6 +425,10 @@ belong to the consumer.
 - **`commitLogSource`** — `CommitLog(ref)`; implemented by `diff.Git`, `diff.Hg`, `diff.Jj` (via
   `diff.CommitLogger` capability; resolved at Model construction by type-assertion on the Renderer
   when `ModelConfig.CommitLog` is nil)
+- **`diff.CommitScoper`** — `CommitScope(hash)`; implemented by `diff.Git`, `diff.Hg`, `diff.Jj`.
+  Narrows one commit to a combined ref (`<hash>^..<hash>`, jj `<hash>-..<hash>`, git's empty-tree
+  object as the base for a root commit). Used only in the composition root, by
+  `resolveCommitStops`, never from `app/ui`
 - **`SyntaxHighlighter`** — `HighlightLines()`, `SetStyle()`, `StyleName()`; implemented by
   `highlight.Highlighter`
 - **`Blamer`** — `FileBlame()`; implemented by `diff.Git`, `diff.Hg`
@@ -577,6 +581,19 @@ the previous row wins.
 ### Overlay Flow
 
 ```
+Per-commit review ('--per-commit', keys '>' / '<')
+  → main resolves the commit list once via resolveCommitStops (CommitLogger +
+     CommitScoper), oldest first, and passes []ui.CommitStop into ModelConfig
+  → NewModel starts on stop 0: cfg.ref becomes that stop's scoped ref, the store's
+     commit scope and commit order are set, and commitNav.baseRef keeps the whole
+     range for the info popup's commit list
+  → handleCommitNav moves the index, swaps cfg.ref, calls store.SetCommit, and
+     re-fires triggerReload(); annotations are NOT cleared — they stay filed under
+     the commit they were written against and only the visible scope changes
+  → annotation.Store scopes Add/Get/Has/Delete/Files by commit while Count/All/
+     FormatOutput span every commit, so the same file:line carries a distinct
+     comment per commit and the output groups by '# commit <hash>' section
+
 User presses '?' / '@' / 'T' / 'P' / 'i'
   → Model calls overlay.OpenHelp/OpenAnnotList/OpenThemeSelect/OpenFilePicker/OpenInfo
       (for 'i': review scope is assembled from ReviewInfoConfig and current

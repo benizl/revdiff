@@ -411,6 +411,36 @@ type commitsState struct {
 	loadSeq    uint64            // bumped before each new commit-log load; stale commitsLoadedMsg (seq mismatch) is dropped
 }
 
+// CommitStop is one stop in a per-commit review: the commit being reviewed and
+// the ref that scopes the diff to that commit's own changes.
+type CommitStop struct {
+	Hash    string // full hash or VCS change id
+	Subject string // first line of the commit message
+	Ref     string // combined ref covering only this commit, e.g. "<hash>^..<hash>"
+}
+
+// commitNavState holds the per-commit review walk. Stops are resolved before the
+// TUI starts (ModelConfig.CommitStops) and never re-fetched, so moving between
+// commits is an index change plus the reload the ref swap implies. Empty stops
+// mean the session reviews its whole range at once and the navigation actions are
+// no-ops.
+type commitNavState struct {
+	stops   []CommitStop // commits under review, oldest first
+	idx     int          // current position in stops
+	baseRef string       // the whole reviewed range, kept for the info popup's commit list
+	hint    string       // transient status-bar message from the last navigation attempt
+}
+
+// enabled reports whether this is a per-commit session.
+func (c commitNavState) enabled() bool {
+	return len(c.stops) > 0
+}
+
+// current returns the stop under review. Only valid when enabled.
+func (c commitNavState) current() CommitStop {
+	return c.stops[c.idx]
+}
+
 // ReviewInfoConfig carries startup invocation details for the unified info
 // overlay (description + session info + commits, all keyed off `i`). It is
 // assembled in main from CLI/VCS setup data and threaded into the model
@@ -595,6 +625,7 @@ type Model struct {
 	search      searchState       // search lifecycle state
 	annot       annotationState   // annotation input lifecycle state
 	commits     commitsState      // eagerly loaded commit log for the info popup
+	commitNav   commitNavState    // per-commit review walk; zero value means whole-range review
 	review      reviewInfoState   // invocation summary + whole-review aggregate stats for the review-info overlay
 	reviewed    reviewedState     // semantic fingerprints for mark_reviewed
 	reload      reloadState       // pending-confirmation state and applicability for R reload
@@ -741,6 +772,13 @@ type ModelConfig struct {
 	// (e.g. var c *Foo; cfg.CommitLog = c) and the typed-nil is collapsed to
 	// nil before the type-assertion fallback runs (mirrors the Editor guard).
 	CommitLog commitLogSource
+
+	// CommitStops turns the session into a per-commit review: each stop is one
+	// commit and the ref that narrows the diff to it, oldest first. The model
+	// starts on the first stop and moves between them on the commit-navigation
+	// actions. Empty (the default) reviews the whole range at once, as before.
+	// Resolved in the composition root so navigation never has to wait on the VCS.
+	CommitStops []CommitStop
 
 	// --- Configuration values ---
 	Ref              string
@@ -896,6 +934,19 @@ func NewModel(cfg ModelConfig) (Model, error) {
 		tree.ToggleUnreviewedFilter()
 	}
 
+	nav := commitNavState{stops: cfg.CommitStops, baseRef: cfg.Ref}
+	startRef := cfg.Ref
+	if nav.enabled() {
+		startRef = nav.current().Ref
+		hashes := make([]string, len(nav.stops))
+		subjects := make([]string, len(nav.stops))
+		for i, s := range nav.stops {
+			hashes[i], subjects[i] = s.Hash, s.Subject
+		}
+		cfg.Store.SetCommitOrder(hashes, subjects)
+		cfg.Store.SetCommit(nav.current().Hash)
+	}
+
 	return Model{
 		resolver:      cfg.StyleResolver,
 		renderer:      cfg.StyleRenderer,
@@ -913,7 +964,7 @@ func NewModel(cfg ModelConfig) (Model, error) {
 		editor:        ed,
 		postFlushHook: postFlushHook,
 		cfg: modelConfigState{
-			ref:                cfg.Ref,
+			ref:                startRef,
 			staged:             cfg.Staged,
 			only:               cfg.Only,
 			workDir:            cfg.WorkDir,
@@ -953,6 +1004,7 @@ func NewModel(cfg ModelConfig) (Model, error) {
 			source:     cls,
 			applicable: cfg.CommitsApplicable && cls != nil,
 		},
+		commitNav: nav,
 		review: reviewInfoState{
 			cfg:                    reviewCfg,
 			descriptionHighlighted: precomputeDescriptionHighlight(cfg.Highlighter, descriptionFromConfig(reviewCfg)),
@@ -1047,6 +1099,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// transient hints persist for exactly one render cycle; any key that reaches
 	// this point dismisses the last hint before the new action runs.
 	m.reload.hint = ""
+	m.commitNav.hint = ""
 	m.output.hint = ""
 	m.compact.hint = ""
 	m.editorState.hint = ""
@@ -1128,10 +1181,8 @@ func (m Model) dispatchAction(action keymap.Action) (tea.Model, tea.Cmd) {
 		return m.handleFilterToggle()
 	case keymap.ActionFilterUnreviewed:
 		return m.handleUnreviewedFilterToggle()
-	case keymap.ActionNextItem:
-		return m.handleFileOrSearchNav(true)
-	case keymap.ActionPrevItem:
-		return m.handleFileOrSearchNav(false)
+	case keymap.ActionNextItem, keymap.ActionPrevItem:
+		return m.handleFileOrSearchNav(action == keymap.ActionNextItem)
 	case keymap.ActionConfirm:
 		return m.handleEnterKey()
 	case keymap.ActionAnnotateFile:
@@ -1147,6 +1198,8 @@ func (m Model) dispatchAction(action keymap.Action) (tea.Model, tea.Cmd) {
 		return m.handleAnnotNav(action == keymap.ActionNextAnnotation)
 	case keymap.ActionReload:
 		return m.handleReload()
+	case keymap.ActionNextCommit, keymap.ActionPrevCommit:
+		return m.handleCommitNav(action == keymap.ActionNextCommit)
 	case keymap.ActionFlushOutput:
 		return m.handleFlushOutput()
 	default: // remaining actions (navigation, search, etc.) handled by pane-specific handlers below

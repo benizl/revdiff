@@ -16,8 +16,13 @@ import (
 //	## path:N (T)
 //	## path:N-M (T)
 //
-// where T is one of "+", "-", or " " (literal space).
-var headerRe = regexp.MustCompile(`^## (.+?)(?::(\d+)(?:-(\d+))?)? \((file-level|\+|-| )\)$`)
+// where T is one of "+", "-", or " " (literal space). Each shape may carry a
+// " | <verbatim line>" anchor tail, which the final group captures.
+var headerRe = regexp.MustCompile(`^## (.+?)(?::(\d+)(?:-(\d+))?)? \((file-level|\+|-| )\)(?: \| (.*))?$`)
+
+// commitSectionRe matches the "# commit <hash> <subject>" section headers
+// emitted by Store.FormatOutput in per-commit mode. The subject is optional.
+var commitSectionRe = regexp.MustCompile(`^# commit ([0-9a-fA-F]{4,64}|[k-z]{4,64})(?: (.*))?$`)
 
 // Parse reads the markdown produced by Store.FormatOutput and returns the
 // recovered annotations in source order. Duplicates (same file/line/type) are
@@ -40,6 +45,7 @@ type parser struct {
 	out          []Annotation
 	current      *Annotation
 	body         []string
+	commit       string // hash from the most recent "# commit" section header
 	seenHeader   bool
 	nonBlankSeen bool
 }
@@ -47,6 +53,11 @@ type parser struct {
 func (p *parser) parse() ([]Annotation, error) {
 	for p.scanner.Scan() {
 		line := p.scanner.Text()
+		if m := commitSectionRe.FindStringSubmatch(line); m != nil {
+			p.flush()
+			p.commit = m[1]
+			continue
+		}
 		if strings.HasPrefix(line, "## ") {
 			ann, err := p.parseHeader(line)
 			if err != nil {
@@ -90,10 +101,13 @@ func (p *parser) parse() ([]Annotation, error) {
 
 // appendBody adds a body line, stripping the inverse of escapeHeaderLines:
 // exactly one leading space when the line's first non-space content begins
-// with "## ".
+// with "## " or matches a commit section header.
 func (p *parser) appendBody(line string) {
-	if strings.HasPrefix(line, " ") && strings.HasPrefix(strings.TrimLeft(line, " "), "## ") {
-		line = line[1:]
+	if strings.HasPrefix(line, " ") {
+		trimmed := strings.TrimLeft(line, " ")
+		if strings.HasPrefix(trimmed, "## ") || commitSectionRe.MatchString(trimmed) {
+			line = line[1:]
+		}
 	}
 	p.body = append(p.body, line)
 }
@@ -120,7 +134,7 @@ func (p *parser) parseHeader(line string) (Annotation, error) {
 	if m == nil {
 		return Annotation{}, fmt.Errorf("malformed annotation header: %q", line)
 	}
-	ann := Annotation{File: m[1]}
+	ann := Annotation{File: m[1], Commit: p.commit, Anchor: m[5]}
 	if m[4] == "file-level" {
 		// file-level headers are emitted as "## path (file-level)" with no
 		// numeric suffix on the path. if the regex consumed a `:N`/`:N-M`

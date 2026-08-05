@@ -10,31 +10,78 @@ import (
 )
 
 // Annotation represents a user comment on a specific diff line.
+//
+// Commit and Anchor are populated only in per-commit review mode. Line numbers
+// are in the coordinates of Commit's own diff, not of the branch tip, so a
+// consumer needs Commit to resolve them; Anchor carries the verbatim text of the
+// annotated line so the position can also be recovered by content once the line
+// has moved.
 type Annotation struct {
 	File    string // file path relative to repo root
 	Line    int    // line number in the diff
 	EndLine int    // end line of hunk range, 0 means no range
 	Type    string // change type: "+", "-", or " "
 	Comment string // user comment text
+	Commit  string // commit the line numbers belong to; empty outside per-commit mode
+	Anchor  string // verbatim text of the annotated line; empty when unavailable
 }
 
 // Store holds annotations in memory, keyed by filename.
+//
+// A Store carries a current commit, set by SetCommit and empty by default. The
+// per-line operations (Add, Get, Has, Delete, Files) act only on annotations
+// belonging to that commit, so callers working in terms of the diff on screen
+// need no commit argument of their own. The whole-store operations (Count, All,
+// Clear, FormatOutput, WriteFile) span every commit. With the commit left empty
+// the two sets coincide.
 type Store struct {
-	annotations map[string][]Annotation
+	annotations  map[string][]Annotation
+	commit       string            // current scope; "" outside per-commit mode
+	commitOrder  []string          // commit hashes in review order, for FormatOutput grouping
+	commitLabels map[string]string // hash -> subject, for FormatOutput section headers
 }
 
 // NewStore creates a new empty annotation store.
 func NewStore() *Store {
-	return &Store{annotations: make(map[string][]Annotation)}
+	return &Store{annotations: make(map[string][]Annotation), commitLabels: make(map[string]string)}
 }
 
-// Add adds an annotation for the given file and line.
-// If an annotation already exists at the same file:line, it is replaced.
+// SetCommit sets the commit the per-line operations act on. Empty restores
+// unscoped behavior.
+func (s *Store) SetCommit(hash string) {
+	s.commit = hash
+}
+
+// Commit returns the current commit scope.
+func (s *Store) Commit() string {
+	return s.commit
+}
+
+// SetCommitOrder records the commits under review, oldest first, alongside their
+// subjects. FormatOutput emits sections in this order; commits missing from it
+// sort after the known ones, by hash.
+func (s *Store) SetCommitOrder(hashes, subjects []string) {
+	s.commitOrder = append([]string(nil), hashes...)
+	s.commitLabels = make(map[string]string, len(hashes))
+	for i, h := range hashes {
+		if i < len(subjects) {
+			s.commitLabels[h] = subjects[i]
+		}
+	}
+}
+
+// Add adds an annotation for the given file and line, stamping it with the
+// current commit scope. If an annotation already exists at the same file:line
+// within that scope, it is replaced.
 func (s *Store) Add(a Annotation) {
+	if a.Commit == "" {
+		a.Commit = s.commit
+	}
 	existing := s.annotations[a.File]
-	if i, ok := s.find(a.File, a.Line, a.Type); ok {
+	if i, ok := s.findIn(a.File, a.Line, a.Type, a.Commit); ok {
 		existing[i].Comment = a.Comment
 		existing[i].EndLine = a.EndLine
+		existing[i].Anchor = a.Anchor
 		return
 	}
 	s.annotations[a.File] = append(existing, a)
@@ -61,20 +108,32 @@ func (s *Store) Has(file string, line int, changeType string) bool {
 	return ok
 }
 
-// find returns the index of an annotation matching file, line, and changeType.
+// find returns the index of an annotation in the current commit scope matching
+// file, line, and changeType.
 func (s *Store) find(file string, line int, changeType string) (int, bool) {
+	return s.findIn(file, line, changeType, s.commit)
+}
+
+// findIn returns the index of an annotation matching file, line, changeType and
+// commit.
+func (s *Store) findIn(file string, line int, changeType, commit string) (int, bool) {
 	for i, a := range s.annotations[file] {
-		if a.Line == line && a.Type == changeType {
+		if a.Line == line && a.Type == changeType && a.Commit == commit {
 			return i, true
 		}
 	}
 	return 0, false
 }
 
-// Get returns all annotations for the given file, sorted by line number.
+// Get returns the current commit's annotations for the given file, sorted by
+// line number.
 func (s *Store) Get(file string) []Annotation {
-	result := make([]Annotation, len(s.annotations[file]))
-	copy(result, s.annotations[file])
+	result := make([]Annotation, 0, len(s.annotations[file]))
+	for _, a := range s.annotations[file] {
+		if a.Commit == s.commit {
+			result = append(result, a)
+		}
+	}
 	sort.Slice(result, func(i, j int) bool { return result[i].Line < result[j].Line })
 	return result
 }
@@ -105,8 +164,25 @@ func (s *Store) All() map[string][]Annotation {
 	return result
 }
 
-// Files returns the list of files that have annotations, sorted alphabetically.
+// Files returns the files that have annotations in the current commit scope,
+// sorted alphabetically.
 func (s *Store) Files() []string {
+	files := make([]string, 0, len(s.annotations))
+	for file, anns := range s.annotations {
+		for _, a := range anns {
+			if a.Commit == s.commit {
+				files = append(files, file)
+				break
+			}
+		}
+	}
+	sort.Strings(files)
+	return files
+}
+
+// allFiles returns every file with annotations regardless of commit, sorted
+// alphabetically.
+func (s *Store) allFiles() []string {
 	files := make([]string, 0, len(s.annotations))
 	for file := range s.annotations {
 		files = append(files, file)
@@ -135,6 +211,15 @@ func (s *Store) Load(r io.Reader) error {
 // Files are sorted alphabetically, annotations within each file by line number.
 // Returns empty string if no annotations exist.
 //
+// Annotations carrying a commit are grouped into "# commit <hash> <subject>"
+// sections, in the order given to SetCommitOrder. The single-hash heading level
+// keeps sections clear of the "## " record-header grammar, so a reader that only
+// knows about records sees them as prose. Records with no commit are emitted
+// first, ungrouped, which is the whole output outside per-commit mode.
+//
+// A record header ends with " | <verbatim line>" when the annotation has an
+// anchor, giving a consumer the annotated line's content next to its number.
+//
 // Body lines that start with "## " (the record-header form) are prefixed with a
 // single space on output so parsers that split on "## " record headers cannot
 // mistake a comment line for a new record. The added space is cosmetic
@@ -146,29 +231,90 @@ func (s *Store) FormatOutput() string {
 		return ""
 	}
 
-	files := s.Files()
-
 	var buf strings.Builder
 	first := true
-	for _, file := range files {
-		anns := s.Get(file) // sorted by line: file-level (0) first, then ascending
-		for _, a := range anns {
+	for _, commit := range s.outputCommits() {
+		if commit != "" {
 			if !first {
 				buf.WriteString("\n")
 			}
-			first = false
-			body := s.escapeHeaderLines(a.Comment)
-			switch {
-			case a.Line == 0:
-				fmt.Fprintf(&buf, "## %s (file-level)\n%s\n", a.File, body)
-			case a.EndLine > 0:
-				fmt.Fprintf(&buf, "## %s:%d-%d (%s)\n%s\n", a.File, a.Line, a.EndLine, a.Type, body)
-			default:
-				fmt.Fprintf(&buf, "## %s:%d (%s)\n%s\n", a.File, a.Line, a.Type, body)
+			fmt.Fprintf(&buf, "# commit %s", commit)
+			if subject := s.commitLabels[commit]; subject != "" {
+				fmt.Fprintf(&buf, " %s", subject)
+			}
+			buf.WriteString("\n")
+			first = true // the section's first record needs no separator of its own
+		}
+		for _, file := range s.allFiles() {
+			for _, a := range s.commitAnnotations(file, commit) {
+				if !first {
+					buf.WriteString("\n")
+				}
+				first = false
+				buf.WriteString(s.formatRecord(a))
 			}
 		}
 	}
 	return buf.String()
+}
+
+// formatRecord renders one annotation as a header line plus body.
+func (s *Store) formatRecord(a Annotation) string {
+	var head string
+	switch {
+	case a.Line == 0:
+		head = fmt.Sprintf("## %s (file-level)", a.File)
+	case a.EndLine > 0:
+		head = fmt.Sprintf("## %s:%d-%d (%s)", a.File, a.Line, a.EndLine, a.Type)
+	default:
+		head = fmt.Sprintf("## %s:%d (%s)", a.File, a.Line, a.Type)
+	}
+	if a.Anchor != "" {
+		head += " | " + a.Anchor
+	}
+	return head + "\n" + s.escapeHeaderLines(a.Comment) + "\n"
+}
+
+// commitAnnotations returns the file's annotations for one commit, sorted by
+// line number (file-level first, then ascending).
+func (s *Store) commitAnnotations(file, commit string) []Annotation {
+	result := make([]Annotation, 0, len(s.annotations[file]))
+	for _, a := range s.annotations[file] {
+		if a.Commit == commit {
+			result = append(result, a)
+		}
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].Line < result[j].Line })
+	return result
+}
+
+// outputCommits returns the commits present in the store, ordered by
+// commitOrder. The empty commit sorts first; commits absent from commitOrder
+// follow the known ones, sorted by hash.
+func (s *Store) outputCommits() []string {
+	present := make(map[string]bool)
+	for _, anns := range s.annotations {
+		for _, a := range anns {
+			present[a.Commit] = true
+		}
+	}
+	ordered := make([]string, 0, len(present))
+	if present[""] {
+		ordered = append(ordered, "")
+		delete(present, "")
+	}
+	for _, h := range s.commitOrder {
+		if present[h] {
+			ordered = append(ordered, h)
+			delete(present, h)
+		}
+	}
+	rest := make([]string, 0, len(present))
+	for h := range present {
+		rest = append(rest, h)
+	}
+	sort.Strings(rest)
+	return append(ordered, rest...)
 }
 
 // WriteFile writes FormatOutput to path atomically (temp file + rename, mode
@@ -183,18 +329,19 @@ func (s *Store) WriteFile(path string) (string, error) {
 }
 
 // escapeHeaderLines prefixes any body line whose first non-space content is
-// "## " with a single extra space. The parser inverts this by stripping one
-// leading space from any body line that, after left-trimming, begins with
-// "## ". Escaping pre-indented variants (e.g. " ## ") keeps the round-trip
+// "## ", or which reads as a "# commit <hash>" section header, with a single
+// extra space. The parser inverts this by stripping one leading space from such
+// body lines. Escaping pre-indented variants (e.g. " ## ") keeps the round-trip
 // symmetric for arbitrary user content. Other heading forms like "### " are
-// not escaped since they cannot collide with the record-header split marker.
+// not escaped since they cannot collide with either split marker.
 func (s *Store) escapeHeaderLines(body string) string {
-	if !strings.Contains(body, "## ") {
+	if !strings.Contains(body, "## ") && !strings.Contains(body, "# commit ") {
 		return body
 	}
 	lines := strings.Split(body, "\n")
 	for i, line := range lines {
-		if strings.HasPrefix(strings.TrimLeft(line, " "), "## ") {
+		trimmed := strings.TrimLeft(line, " ")
+		if strings.HasPrefix(trimmed, "## ") || commitSectionRe.MatchString(trimmed) {
 			lines[i] = " " + line
 		}
 	}

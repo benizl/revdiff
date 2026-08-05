@@ -600,3 +600,103 @@ func TestStore_Count(t *testing.T) {
 	s.Delete("a.go", 1, "+")
 	assert.Equal(t, 2, s.Count(), "count should decrease after delete")
 }
+
+func TestStore_CommitScoping(t *testing.T) {
+	s := NewStore()
+	s.SetCommit("aaa111")
+	s.Add(Annotation{File: "handler.go", Line: 43, Type: "+", Comment: "first commit note"})
+	s.SetCommit("bbb222")
+	s.Add(Annotation{File: "handler.go", Line: 43, Type: "+", Comment: "second commit note"})
+
+	t.Run("same file:line in two commits coexist", func(t *testing.T) {
+		assert.Equal(t, 2, s.Count())
+	})
+
+	t.Run("Get is scoped to the current commit", func(t *testing.T) {
+		anns := s.Get("handler.go")
+		require.Len(t, anns, 1)
+		assert.Equal(t, "second commit note", anns[0].Comment)
+		assert.Equal(t, "bbb222", anns[0].Commit)
+
+		s.SetCommit("aaa111")
+		anns = s.Get("handler.go")
+		require.Len(t, anns, 1)
+		assert.Equal(t, "first commit note", anns[0].Comment)
+	})
+
+	t.Run("Has and Delete are scoped to the current commit", func(t *testing.T) {
+		s.SetCommit("ccc333")
+		assert.False(t, s.Has("handler.go", 43, "+"))
+		assert.False(t, s.Delete("handler.go", 43, "+"))
+
+		s.SetCommit("aaa111")
+		assert.True(t, s.Has("handler.go", 43, "+"))
+		assert.True(t, s.Delete("handler.go", 43, "+"))
+		assert.Equal(t, 1, s.Count())
+	})
+
+	t.Run("Files is scoped to the current commit", func(t *testing.T) {
+		s.SetCommit("bbb222")
+		assert.Equal(t, []string{"handler.go"}, s.Files())
+		s.SetCommit("ccc333")
+		assert.Empty(t, s.Files())
+	})
+}
+
+func TestStore_AddPreservesExplicitCommit(t *testing.T) {
+	s := NewStore()
+	s.SetCommit("aaa111")
+	s.Add(Annotation{File: "a.go", Line: 1, Type: "+", Comment: "preloaded", Commit: "bbb222"})
+
+	assert.Empty(t, s.Get("a.go"), "annotation belongs to bbb222, not the current scope")
+	s.SetCommit("bbb222")
+	require.Len(t, s.Get("a.go"), 1)
+}
+
+func TestStore_FormatOutput_CommitSections(t *testing.T) {
+	s := NewStore()
+	s.SetCommitOrder([]string{"aaa111", "bbb222"}, []string{"add parser", "fix parser"})
+	s.SetCommit("bbb222")
+	s.Add(Annotation{File: "b.go", Line: 7, Type: "-", Comment: "why remove this?", Anchor: "\tdefer f.Close()"})
+	s.SetCommit("aaa111")
+	s.Add(Annotation{File: "a.go", Line: 12, Type: "+", Comment: "unchecked error", Anchor: "\tf, _ := os.Open(p)"})
+
+	want := "# commit aaa111 add parser\n" +
+		"## a.go:12 (+) | \tf, _ := os.Open(p)\n" +
+		"unchecked error\n" +
+		"\n# commit bbb222 fix parser\n" +
+		"## b.go:7 (-) | \tdefer f.Close()\n" +
+		"why remove this?\n"
+	assert.Equal(t, want, s.FormatOutput())
+}
+
+func TestStore_FormatOutput_UnorderedCommitsSortLast(t *testing.T) {
+	s := NewStore()
+	s.SetCommitOrder([]string{"aaa111"}, []string{"known"})
+	s.SetCommit("zzz999")
+	s.Add(Annotation{File: "z.go", Line: 1, Type: "+", Comment: "unknown commit"})
+	s.SetCommit("aaa111")
+	s.Add(Annotation{File: "a.go", Line: 1, Type: "+", Comment: "known commit"})
+	s.SetCommit("")
+	s.Add(Annotation{File: "n.go", Line: 1, Type: "+", Comment: "no commit"})
+
+	out := s.FormatOutput()
+	assert.Less(t, strings.Index(out, "no commit"), strings.Index(out, "known commit"))
+	assert.Less(t, strings.Index(out, "known commit"), strings.Index(out, "unknown commit"))
+	assert.NotContains(t, strings.SplitN(out, "# commit", 2)[0], "# commit", "uncommitted records precede any section")
+}
+
+func TestStore_RoundTrip_CommitAndAnchor(t *testing.T) {
+	s := NewStore()
+	s.SetCommitOrder([]string{"aaa111"}, []string{"subject line"})
+	s.SetCommit("aaa111")
+	s.Add(Annotation{File: "a.go", Line: 5, EndLine: 9, Type: "+", Comment: "body\n# commit bbb222 not a section\n## a.go:1 (+) not a header", Anchor: "code | with pipe"})
+
+	loaded := NewStore()
+	require.NoError(t, loaded.Load(strings.NewReader(s.FormatOutput())))
+	loaded.SetCommit("aaa111")
+
+	got := loaded.Get("a.go")
+	require.Len(t, got, 1)
+	assert.Equal(t, s.Get("a.go")[0], got[0])
+}

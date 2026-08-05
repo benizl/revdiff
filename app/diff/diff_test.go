@@ -1902,3 +1902,73 @@ func TestGit_ChangedFileWithMagicNameRoundTrips(t *testing.T) {
 	added, _ := changeContents(lines)
 	assert.Equal(t, []string{"real"}, added)
 }
+
+func TestGit_CommitScope(t *testing.T) {
+	dir := setupTestRepo(t)
+	writeFile(t, dir, "f.txt", "a\n")
+	gitCmd(t, dir, "add", "f.txt")
+	gitCmd(t, dir, "commit", "-m", "root")
+	rootRaw, err := exec.Command("git", "-C", dir, "rev-parse", "HEAD").Output() //nolint:gosec // test-controlled args
+	require.NoError(t, err)
+	root := strings.TrimSpace(string(rootRaw))
+
+	writeFile(t, dir, "f.txt", "a\nb\n")
+	gitCmd(t, dir, "commit", "-am", "second")
+	secondRaw, err := exec.Command("git", "-C", dir, "rev-parse", "HEAD").Output() //nolint:gosec // test-controlled args
+	require.NoError(t, err)
+	second := strings.TrimSpace(string(secondRaw))
+
+	g := NewGit(dir)
+
+	t.Run("commit with parent", func(t *testing.T) {
+		ref, err := g.CommitScope(second)
+		require.NoError(t, err)
+		assert.Equal(t, second+"^.."+second, ref)
+	})
+
+	t.Run("root commit falls back to empty tree", func(t *testing.T) {
+		ref, err := g.CommitScope(root)
+		require.NoError(t, err)
+		assert.Equal(t, emptyTreeHash+".."+root, ref)
+	})
+
+	t.Run("scoped ref diffs only that commit", func(t *testing.T) {
+		ref, err := g.CommitScope(second)
+		require.NoError(t, err)
+		lines, err := g.FileDiff(FileDiffRequest{Ref: ref, Path: "f.txt"})
+		require.NoError(t, err)
+		added, removed := changeContents(lines)
+		assert.Equal(t, []string{"b"}, added)
+		assert.Empty(t, removed)
+	})
+
+	t.Run("empty hash", func(t *testing.T) {
+		_, err := g.CommitScope("  ")
+		require.Error(t, err)
+	})
+
+	t.Run("unknown commit", func(t *testing.T) {
+		_, err := g.CommitScope("deadbeefdeadbeefdeadbeefdeadbeefdeadbeef")
+		require.Error(t, err)
+	})
+}
+
+func TestHg_CommitScope(t *testing.T) {
+	h := NewHg(t.TempDir())
+	ref, err := h.CommitScope("abc123")
+	require.NoError(t, err)
+	assert.Equal(t, "abc123^..abc123", ref)
+
+	_, err = h.CommitScope("")
+	require.Error(t, err)
+}
+
+func TestJj_CommitScope(t *testing.T) {
+	j := NewJj(t.TempDir())
+	ref, err := j.CommitScope("xyzwuv")
+	require.NoError(t, err)
+	assert.Equal(t, "xyzwuv-..xyzwuv", ref)
+
+	_, err = j.CommitScope("")
+	require.Error(t, err)
+}

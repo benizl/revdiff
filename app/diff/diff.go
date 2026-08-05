@@ -168,6 +168,17 @@ type CommitLogger interface {
 	CommitLog(ref string) ([]CommitInfo, error)
 }
 
+// CommitScoper is an optional capability interface implemented by VCS renderers
+// that can narrow a single commit to a combined-ref range covering only that
+// commit's own changes. The returned ref uses the same "X..Y" convention the
+// Renderer methods accept, so callers can swap it in wherever a range ref goes.
+//
+// For a merge commit the range covers the first-parent diff, matching what the
+// VCS reports for the commit itself.
+type CommitScoper interface {
+	CommitScope(hash string) (string, error)
+}
+
 // commitLogFormat is the git-log --format template used by (*Git).CommitLog.
 // Fields inside a record are separated by ASCII US (\x1f); records are
 // NUL-separated via -z. Subject and body are joined by a newline inside the
@@ -342,6 +353,33 @@ func (g *Git) commitLogRange(ref string) string {
 		return ref
 	}
 	return ref + "..HEAD"
+}
+
+// emptyTreeHash is git's well-known empty-tree object. Used as the diff base for
+// a root commit, whose content then reads as one big addition instead of failing
+// on a parent that does not exist.
+const emptyTreeHash = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+
+// CommitScope implements CommitScoper for git.
+func (g *Git) CommitScope(hash string) (string, error) {
+	hash = strings.TrimSpace(hash)
+	if hash == "" {
+		return "", errors.New("commit scope: empty hash")
+	}
+	if !g.commitExists(hash) {
+		return "", fmt.Errorf("commit scope: unknown commit %s", hash)
+	}
+	base := hash + "^"
+	if !g.commitExists(base) {
+		base = emptyTreeHash
+	}
+	return base + ".." + hash, nil
+}
+
+// commitExists reports whether rev resolves to a commit object.
+func (g *Git) commitExists(rev string) bool {
+	_, err := g.runGit("rev-parse", "-q", "--verify", rev+"^{commit}")
+	return err == nil
 }
 
 // parseCommitLog parses the raw output of "git log -z --format=<commitLogFormat>"

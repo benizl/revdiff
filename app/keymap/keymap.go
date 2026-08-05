@@ -72,6 +72,8 @@ const (
 	ActionThemeSelect            Action = "theme_select"
 	ActionInfo                   Action = "info"
 	ActionReload                 Action = "reload"
+	ActionNextCommit             Action = "next_commit"
+	ActionPrevCommit             Action = "prev_commit"
 	ActionOpenEditor             Action = "open_editor"
 	ActionOpenFileInEditor       Action = "open_file_in_editor"
 	ActionFlushOutput            Action = "flush_output"
@@ -101,6 +103,8 @@ var validActions = map[Action]bool{
 	ActionQuit: true, ActionDiscardQuit: true, ActionHelp: true, ActionDismiss: true, ActionThemeSelect: true,
 	ActionInfo:             true,
 	ActionReload:           true,
+	ActionNextCommit:       true,
+	ActionPrevCommit:       true,
 	ActionOpenEditor:       true,
 	ActionOpenFileInEditor: true,
 	ActionFlushOutput:      true,
@@ -254,6 +258,8 @@ func defaultDescriptions() []HelpEntry {
 		{ActionThemeSelect, "theme selector", "View"},
 		{ActionInfo, "show review info popup", "View"},
 		{ActionReload, "reload diff from VCS", "View"},
+		{ActionNextCommit, "next commit (--per-commit)", "View"},
+		{ActionPrevCommit, "previous commit (--per-commit)", "View"},
 
 		// quit
 		{ActionQuit, "quit", "Quit"},
@@ -318,6 +324,8 @@ func defaultBindings() map[string]Action {
 		"T":      ActionThemeSelect,
 		"i":      ActionInfo,
 		"R":      ActionReload,
+		">":      ActionNextCommit,
+		"<":      ActionPrevCommit,
 		"esc":    ActionDismiss,
 	}
 }

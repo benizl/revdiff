@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### New Features
+
+- per-commit review of a ref range via `--per-commit`: `>` / `<` walk the commits, annotations are scoped to the commit they were written against, and output groups them under `# commit <hash>` sections with the annotated line carried verbatim in each record header
+
 ## v1.13.0 - 2026-09-04
 
 ### New Features

@@ -1,6 +1,7 @@
 package diff
 
 import (
+	"errors"
 	"fmt"
 	"regexp"
 	"strconv"
@@ -245,6 +246,17 @@ func (h *Hg) CommitLog(ref string) ([]CommitInfo, error) {
 		return nil, fmt.Errorf("commit log: %w", err)
 	}
 	return h.parseCommitLog(out), nil
+}
+
+// CommitScope implements CommitScoper for mercurial. The first-parent revset
+// suffix "^" resolves to the null revision for the root changeset, which hg
+// diffs as a full addition.
+func (h *Hg) CommitScope(hash string) (string, error) {
+	hash = strings.TrimSpace(hash)
+	if hash == "" {
+		return "", errors.New("commit scope: empty hash")
+	}
+	return hash + "^.." + hash, nil
 }
 
 // commitLogRevset translates a combined ref string to hg's revset syntax for

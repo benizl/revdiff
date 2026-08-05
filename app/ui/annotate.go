@@ -234,7 +234,7 @@ func (m *Model) saveComment(text, fileName string, fileLevel bool, line int, cha
 		return
 	}
 
-	a := annotation.Annotation{File: fileName, Line: line, Type: changeType, Comment: text}
+	a := annotation.Annotation{File: fileName, Line: line, Type: changeType, Comment: text, Anchor: m.lineAnchor(fileName, line, changeType)}
 	if hunkKeywordRe.MatchString(text) && fileName == m.file.name {
 		// re-derive the diff-line index from (line, changeType) so hunk-end
 		// detection survives cursor drift during an external editor session.
@@ -261,6 +261,33 @@ func (m *Model) saveComment(text, fileName string, fileLevel bool, line int, cha
 	// sync scroll so a newly added multi-row annotation stays visible when the
 	// cursor sits near the bottom of the viewport.
 	m.syncViewportToCursor()
+}
+
+// lineAnchor returns the verbatim content of the annotated line so the output
+// carries what the comment is about, not only where it sat. Returns empty when
+// the line is not in the loaded file (an annotation saved after navigating away)
+// or when the review is not per-commit, where the ref alone already places the
+// line number.
+func (m Model) lineAnchor(fileName string, line int, changeType string) string {
+	if !m.commitNav.enabled() || fileName != m.file.name {
+		return ""
+	}
+	for _, dl := range m.file.lines {
+		if string(dl.ChangeType) == changeType && m.diffLineNum(dl) == line {
+			return truncateAnchor(diff.SanitizeCommitText(dl.Content))
+		}
+	}
+	return ""
+}
+
+// truncateAnchor caps anchor text at maxAnchorLen runes, marking a cut with an
+// ellipsis so a consumer can tell the content is partial.
+func truncateAnchor(s string) string {
+	runes := []rune(s)
+	if len(runes) <= maxAnchorLen {
+		return s
+	}
+	return string(runes[:maxAnchorLen]) + "…"
 }
 
 // cancelAnnotation exits annotation input mode without saving.

@@ -188,10 +188,18 @@ func run(opts options) (int, error) {
 		vcsType = setup.vcsType
 	}
 
-	if opts.Annotations != "" {
-		if perr := preloadAnnotations(opts.Annotations, store, renderer, opts.ref(), opts.Staged, untrackedFn, untrackedRenamesFn, workDir, os.Stderr); perr != nil {
-			return 0, perr
+	var commitStops []ui.CommitStop
+	if opts.PerCommit {
+		if commitStops, err = resolveCommitStops(commitLogger, opts.ref(), os.Stderr); err != nil {
+			return 0, err
 		}
+	}
+
+	if perr := loadPreloadedAnnotations(preloadReq{
+		opts: opts, store: store, renderer: renderer, stops: commitStops,
+		untrackedFn: untrackedFn, untrackedRenamesFn: untrackedRenamesFn, workDir: workDir, warn: os.Stderr,
+	}); perr != nil {
+		return 0, perr
 	}
 
 	// construct the three style types per D15: Resolver first, Renderer from Resolver, SGR is zero-value
@@ -233,6 +241,7 @@ func run(opts options) (int, error) {
 		PostFlushHook:        postFlushHook,
 		CommitLog:            commitLogger,
 		CommitsApplicable:    commitsApplicable(opts, commitLogger),
+		CommitStops:          commitStops,
 		ReloadApplicable:     reloadApplicable(opts),
 		CompactApplicable:    compactApplicable(opts, renderer),
 		NoColors:             opts.NoColors,

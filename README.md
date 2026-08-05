@@ -369,6 +369,7 @@ Positional arguments support several forms:
 - `revdiff main feature` — diff between two refs
 - `revdiff main..feature` — same as above, using git's dot-dot syntax
 - `revdiff main...feature` — changes since `feature` diverged from `main`
+- `revdiff --per-commit main..feature` — walk the range one commit at a time (see [Per-Commit Review](#per-commit-review))
 
 ### Options
 
@@ -377,6 +378,7 @@ Positional arguments support several forms:
 | `base` | Git ref to diff against | uncommitted changes |
 | `against` | Second git ref for two-ref diff | |
 | `--staged` | Show staged changes, env: `REVDIFF_STAGED` | `false` |
+| `--per-commit` | Review a ref range one commit at a time, env: `REVDIFF_PER_COMMIT` | `false` |
 | `--untracked` | Show untracked files in the tree, env: `REVDIFF_UNTRACKED` | `false` |
 | `--tree-width` | File tree panel width in units (1-10), env: `REVDIFF_TREE_WIDTH` | `2` |
 | `--tab-width` | Number of spaces per tab character, env: `REVDIFF_TAB_WIDTH` | `4` |
@@ -699,6 +701,34 @@ When reviewing a single markdown file in context-only mode (e.g., `revdiff --onl
 
 This mode activates when all three conditions are met: single file, markdown extension (`.md`/`.markdown`), and all lines are context (no diff changes). Headers inside fenced code blocks are excluded from the TOC.
 
+### Per-Commit Review
+
+`--per-commit` turns a ref range into a walk over its individual commits instead of one combined diff:
+
+```
+revdiff --per-commit main..feature
+```
+
+The session opens on the oldest commit in the range, showing only that commit's own changes. `>` moves to the next commit, `<` to the previous one; the status bar shows `commit N/M <hash>`. The commit list is resolved once at startup, so navigation is instant and cannot fail part-way through a review.
+
+Annotations belong to the commit they were written against. Walking back and forth never loses them, and the same `file:line` can carry a different comment in each commit. Output groups them accordingly:
+
+```
+# commit 9a1c4f2e8b3d5a7c6e9f0b1d2a3c4e5f6a7b8c9d fix the parser
+## parser.go:88 (+) | 	if tok == nil {
+this can't happen after the guard above
+
+# commit 4f2e8b3d5a7c6e9f0b1d2a3c4e5f6a7b8c9d9a1c add the tests
+## parser_test.go:12 (+) | func TestParse(t *testing.T) {
+table-driven would cover the error cases too
+```
+
+Because line numbers are in each commit's own coordinates, the commit hash is what makes them resolvable — the same anchoring GitHub and GitLab store with a review comment. The `| ` tail on each record header carries the annotated line verbatim, so a consumer can also find the line by content once it has moved; `git blame --reverse <hash>..HEAD -L N,N -- <path>` maps it forward to the branch tip.
+
+`--annotations` round-trips this format: each record is validated against its own commit's diff, and records for commits outside the reviewed range are dropped with a warning.
+
+`--per-commit` requires a ref or range and cannot be combined with `--staged`, `--all-files`, `--stdin`, or compare mode. Ranges are capped at 500 commits (`revdiff` warns when it truncates). For a merge commit the range covers the first-parent diff.
+
 ### Beyond Code Review
 
 The `--only` flag enables use cases beyond VCS diffs. Any text file can be loaded for annotation — no VCS repo required.
@@ -756,6 +786,7 @@ In the Claude Code and Codex plugins, you can also tell the agent to use a past 
 | `P` | Open the file picker |
 | `[` / `]` | Jump to previous/next change hunk in diff; add `--cross-file-hunks` to continue into the previous/next file at the boundary |
 | `e` | Open focused file in `$EDITOR` |
+| `>` / `<` | Next/previous commit in `--per-commit` mode |
 
 The file picker lists paths currently visible in the sidebar, so annotated-only and unreviewed-only filters remain active. Printable keys always filter full relative paths; use the arrow keys or mouse wheel to move, and press `Enter` or left-click to jump. `Backspace` edits the filter. The first `Esc` clears a non-empty filter and keeps the picker open; the second closes it. Because printable keys always filter, `P` typed inside the picker adds to the filter rather than closing it; a `jump_file` binding with a modifier (e.g. `map alt+f jump_file`) closes the picker when pressed again.
 
@@ -943,7 +974,7 @@ When the leader is pressed, the status bar shows `Pending: ctrl+w, esc to cancel
 
 **Annotations:** `confirm` (annotate line / select file), `annotate_file`, `delete_annotation`, `annot_list`, `open_editor`, `next_annotation`, `prev_annotation`, `flush_output`
 
-**View:** `toggle_collapsed`, `toggle_compact`, `toggle_wrap`, `toggle_tree`, `toggle_line_numbers`, `toggle_blame`, `toggle_word_diff`, `toggle_hunk`, `toggle_untracked`, `mark_reviewed`, `filter_unreviewed`, `theme_select`, `filter`, `info`, `reload`
+**View:** `toggle_collapsed`, `toggle_compact`, `toggle_wrap`, `toggle_tree`, `toggle_line_numbers`, `toggle_blame`, `toggle_word_diff`, `toggle_hunk`, `toggle_untracked`, `mark_reviewed`, `filter_unreviewed`, `theme_select`, `filter`, `info`, `reload`, `next_commit`, `prev_commit`
 
 **Quit:** `quit`, `discard_quit`, `help`, `dismiss`
 
@@ -990,7 +1021,9 @@ don't remove this validation
 
 When annotation text contains the keyword "hunk" (case-insensitive, whole word), the output header automatically expands to include the full hunk line range (e.g., `handler.go:43-67 (+)` instead of `handler.go:43 (+)`). This gives AI consumers the range context without any extra steps.
 
-Comment body lines starting with `## ` (the record-header form) are prefixed with a single space on output so parsers that split on `## ` record headers cannot confuse a multi-line comment for a new record.
+In `--per-commit` mode records are grouped under `# commit <hash> <subject>` section headers and each record header carries the annotated line after a `| ` separator; see [Per-Commit Review](#per-commit-review).
+
+Comment body lines starting with `## ` (the record-header form), or reading as a `# commit <hash>` section header, are prefixed with a single space on output so parsers that split on `## ` record headers cannot confuse a multi-line comment for a new record.
 
 ## Contributing
 

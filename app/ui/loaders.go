@@ -203,6 +203,11 @@ func (m Model) loadCommits() tea.Cmd {
 	}
 	seq := m.commits.loadSeq
 	ref := m.cfg.ref
+	if m.commitNav.enabled() {
+		// the popup lists the whole range being reviewed, not the one commit on
+		// screen, so it stays a map of where the current stop sits.
+		ref = m.commitNav.baseRef
+	}
 	src := m.commits.source
 	return func() tea.Msg {
 		list, err := src.CommitLog(ref)
