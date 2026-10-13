@@ -23,6 +23,7 @@ type Colors struct {
 	ModifyBg     string // modified line background (collapsed mode)
 	TreeBg       string // file tree pane background
 	DiffBg       string // diff pane background
+	TermBg       string // detected terminal background, the base for derived fills when DiffBg is empty
 	StatusFg     string // status bar foreground
 	StatusBg     string // status bar background
 	SearchFg     string // search match foreground
@@ -46,6 +47,7 @@ func (c Colors) normalize() Colors {
 	c.AddBg = normalizeColor(c.AddBg)
 	c.RemoveFg = normalizeColor(c.RemoveFg)
 	c.RemoveBg = normalizeColor(c.RemoveBg)
+	c.TermBg = normalizeColor(c.TermBg)
 	// auto-derive word-diff backgrounds from add/remove bg when not explicitly set.
 	// the shift amount is intentionally small (0.08 in HSL lightness, not 0.15): the
 	// default palette uses very dark add/remove bgs (L~0.11-0.15), so a larger shift

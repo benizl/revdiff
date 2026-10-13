@@ -824,6 +824,7 @@ Press `Space` to mark the focused file reviewed. Press `F` to toggle the sidebar
 | `L` | Toggle line numbers (side-by-side old/new for diffs, single column for full-context files) |
 | `B` | Toggle blame gutter (author name + commit age per line) |
 | `W` | Toggle intra-line word-diff highlighting for paired add/remove lines |
+| `s` | Toggle side-by-side view (old and new columns; collapsed mode and full-context files stay inline) |
 | `.` | Expand/collapse individual hunk under cursor (collapsed mode only) |
 | `T` | Open theme selector with live preview |
 | `f` | Toggle filter: all files / annotated only (shown when annotations exist) |
@@ -943,7 +944,7 @@ When the leader is pressed, the status bar shows `Pending: ctrl+w, esc to cancel
 
 **Annotations:** `confirm` (annotate line / select file), `annotate_file`, `delete_annotation`, `annot_list`, `open_editor`, `next_annotation`, `prev_annotation`, `flush_output`
 
-**View:** `toggle_collapsed`, `toggle_compact`, `toggle_wrap`, `toggle_tree`, `toggle_line_numbers`, `toggle_blame`, `toggle_word_diff`, `toggle_hunk`, `toggle_untracked`, `mark_reviewed`, `filter_unreviewed`, `theme_select`, `filter`, `info`, `reload`
+**View:** `toggle_collapsed`, `toggle_compact`, `toggle_wrap`, `toggle_tree`, `toggle_line_numbers`, `toggle_blame`, `toggle_word_diff`, `toggle_side_by_side`, `toggle_hunk`, `toggle_untracked`, `mark_reviewed`, `filter_unreviewed`, `theme_select`, `filter`, `info`, `reload`
 
 **Quit:** `quit`, `discard_quit`, `help`, `dismiss`
 

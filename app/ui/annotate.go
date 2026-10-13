@@ -563,6 +563,10 @@ func (m Model) cursorViewportYUsing(hunks []int, annotationSet map[string]bool) 
 		return 0
 	}
 
+	if m.sideBySideActive() {
+		return m.sbsLineY(m.sbsLayout(annotationSet), m.nav.diffCursor, m.annot.cursorOnAnnotation, annotationSet)
+	}
+
 	y := fileAnnotationOffset
 	for i := 0; i < m.nav.diffCursor && i < len(m.file.lines); i++ {
 		y += m.hunkLineHeight(i, hunks, annotationSet)
@@ -578,6 +582,13 @@ func (m Model) cursorViewportYUsing(hunks []int, annotationSet map[string]bool) 
 // position in O(1) instead of rescanning all preceding lines.
 func (m Model) cursorVisualOffsets(hunks []int, annotationSet map[string]bool) []int {
 	offsets := make([]int, len(m.file.lines))
+	if m.sideBySideActive() {
+		l := m.sbsLayout(annotationSet)
+		for i := range offsets {
+			offsets[i] = l.top[l.rowOf[i]]
+		}
+		return offsets
+	}
 	y := 0
 	if m.hasFileAnnotation() {
 		y = m.wrappedAnnotationLineCount(annotKeyFile)
@@ -598,6 +609,9 @@ func (m Model) cursorViewportYFromOffsets(offsets []int) int {
 	}
 	if m.nav.diffCursor == -1 {
 		return 0
+	}
+	if m.sideBySideActive() {
+		return m.cursorViewportY()
 	}
 	y := offsets[m.nav.diffCursor]
 	if m.annot.cursorOnAnnotation {
@@ -667,6 +681,10 @@ func (m Model) visualRowToDiffLine(row int) (idx int, onAnnotation bool) {
 		return m.nav.diffCursor, false
 	}
 
+	if m.sideBySideActive() {
+		return m.sbsVisualRowToDiffLine(row)
+	}
+
 	var hunks []int
 	if m.modes.collapsed.enabled {
 		hunks = m.findHunks()
@@ -732,6 +750,11 @@ func (m Model) cursorVisualHeight(hunks []int, annotationSet map[string]bool) in
 			return 1
 		}
 		return m.wrappedAnnotationLineCount(m.annotationKey(m.diffLineNum(dl), string(dl.ChangeType)))
+	}
+	if m.sideBySideActive() {
+		l := m.sbsLayout(annotationSet)
+		r := l.rowOf[m.nav.diffCursor]
+		return l.top[r+1] - l.top[r]
 	}
 	return m.hunkLineHeight(m.nav.diffCursor, hunks, annotationSet)
 }

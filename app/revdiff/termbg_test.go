@@ -3,6 +3,7 @@ package main
 import (
 	"testing"
 
+	"github.com/muesli/termenv"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -128,4 +129,10 @@ func TestTmuxEnviron_Environ(t *testing.T) {
 	env := tmuxEnviron{}.Environ()
 	assert.Contains(t, env, "TERM="+maskedTerm, "TERM entry should be masked")
 	assert.NotContains(t, env, "TERM=tmux-256color", "real TERM should not leak through")
+}
+
+func TestRgbHex(t *testing.T) {
+	assert.Equal(t, "#0f1c25", rgbHex(termenv.RGBColor("#0f1c25")))
+	assert.Empty(t, rgbHex(termenv.ANSIColor(0)), "fallback guesses are not a detected background")
+	assert.Empty(t, rgbHex(termenv.NoColor{}))
 }

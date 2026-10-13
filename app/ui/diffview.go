@@ -286,6 +286,10 @@ func (m Model) renderDiff() string {
 	annotationMap, fileComment := m.buildAnnotationMap()
 	var b strings.Builder
 	m.renderFileAnnotationHeader(&b, fileComment)
+	if m.sideBySideActive() {
+		m.renderSideBySide(&b, annotationMap)
+		return b.String()
+	}
 
 	m.renderCache.rebase(m.globalRenderKey(), len(m.file.lines))
 	// a large diff assembles into megabytes; without this the builder reallocates its way
@@ -492,7 +496,7 @@ func (m Model) renderWrappedDiffLine(b *strings.Builder, dl diff.DiffLine, textC
 // returns 1 when wrap mode is off or for divider lines.
 // stays in sync with renderWrappedDiffLine by using the same wrapContent method and width calculation.
 func (m Model) wrappedLineCount(idx int) int {
-	if !m.modes.wrap || idx < 0 || idx >= len(m.file.lines) {
+	if !m.modes.wrap || m.sideBySideActive() || idx < 0 || idx >= len(m.file.lines) {
 		return 1
 	}
 	dl := m.file.lines[idx]

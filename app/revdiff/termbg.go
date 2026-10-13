@@ -55,6 +55,24 @@ func detectDarkBackground() bool {
 	return termenv.NewOutput(os.Stdout, termenv.WithEnvironment(tmuxEnviron{})).HasDarkBackground()
 }
 
+// detectBackgroundHex returns the terminal background as #rrggbb, or "" unless the
+// terminal answered the OSC 11 query (COLORFGBG and termenv's black default are guesses).
+func detectBackgroundHex() string {
+	out := termenv.NewOutput(os.Stdout)
+	if insideTmux(os.Getenv("TMUX"), os.Getenv("TERM"), os.Getenv("TERM_PROGRAM")) {
+		out = termenv.NewOutput(os.Stdout, termenv.WithEnvironment(tmuxEnviron{}))
+	}
+	return rgbHex(out.BackgroundColor())
+}
+
+// rgbHex returns c as #rrggbb when it is a queried RGB color, else "".
+func rgbHex(c termenv.Color) string {
+	if _, ok := c.(termenv.RGBColor); !ok {
+		return ""
+	}
+	return termenv.ConvertToRGB(c).Hex()
+}
+
 // insideTmux reports whether the process runs inside tmux: the $TMUX socket
 // variable is the canonical signal; TERM=tmux-* and TERM=screen-* with
 // TERM_PROGRAM=tmux cover environments that scrub $TMUX. plain GNU screen is

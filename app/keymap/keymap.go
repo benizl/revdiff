@@ -60,6 +60,7 @@ const (
 	ActionToggleLineNums         Action = "toggle_line_numbers"
 	ActionToggleBlame            Action = "toggle_blame"
 	ActionToggleWordDiff         Action = "toggle_word_diff"
+	ActionToggleSideBySide       Action = "toggle_side_by_side"
 	ActionToggleHunk             Action = "toggle_hunk"
 	ActionToggleUntracked        Action = "toggle_untracked"
 	ActionMarkReviewed           Action = "mark_reviewed"
@@ -96,7 +97,7 @@ var validActions = map[Action]bool{
 	ActionConfirm: true, ActionAnnotateFile: true, ActionDeleteAnnotation: true, ActionAnnotList: true,
 	ActionNextAnnotation: true, ActionPrevAnnotation: true,
 	ActionToggleCollapsed: true, ActionToggleCompact: true, ActionToggleWrap: true, ActionToggleTree: true,
-	ActionToggleLineNums: true, ActionToggleBlame: true, ActionToggleWordDiff: true, ActionToggleHunk: true,
+	ActionToggleLineNums: true, ActionToggleBlame: true, ActionToggleWordDiff: true, ActionToggleSideBySide: true, ActionToggleHunk: true,
 	ActionMarkReviewed: true, ActionFilterUnreviewed: true, ActionFilter: true, ActionToggleUntracked: true,
 	ActionQuit: true, ActionDiscardQuit: true, ActionHelp: true, ActionDismiss: true, ActionThemeSelect: true,
 	ActionInfo:             true,
@@ -246,6 +247,7 @@ func defaultDescriptions() []HelpEntry {
 		{ActionToggleLineNums, "toggle line numbers", "View"},
 		{ActionToggleBlame, "toggle blame gutter", "View"},
 		{ActionToggleWordDiff, "toggle word-diff highlighting", "View"},
+		{ActionToggleSideBySide, "toggle side-by-side view", "View"},
 		{ActionToggleHunk, "toggle hunk in collapsed", "View"},
 		{ActionToggleUntracked, "show/hide untracked files", "View"},
 		{ActionMarkReviewed, "mark file as reviewed", "View"},
@@ -307,6 +309,7 @@ func defaultBindings() map[string]Action {
 		"L":      ActionToggleLineNums,
 		"B":      ActionToggleBlame,
 		"W":      ActionToggleWordDiff,
+		"s":      ActionToggleSideBySide,
 		".":      ActionToggleHunk,
 		" ":      ActionMarkReviewed,
 		"F":      ActionFilterUnreviewed,

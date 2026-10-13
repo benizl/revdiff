@@ -438,3 +438,10 @@ func TestResolver_StyleKeyInfoBox(t *testing.T) {
 		assert.NotEqual(t, "x", rendered, "plain info box should still have border decoration")
 	})
 }
+
+func TestResolver_FillerBg(t *testing.T) {
+	assert.Equal(t, Color("\033[48;2;30;30;30m"), NewResolver(Colors{DiffBg: "#141414", TermBg: "#ffffff"}).FillerBg(), "pane bg wins")
+	assert.Equal(t, Color("\033[48;2;21;39;52m"), NewResolver(Colors{TermBg: "#0f1c25"}).FillerBg(), "terminal bg keeps its hue")
+	assert.Empty(t, NewResolver(Colors{Muted: "#585858"}).FillerBg(), "no known bg")
+	assert.Empty(t, PlainResolver().FillerBg())
+}

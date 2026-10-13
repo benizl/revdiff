@@ -82,6 +82,16 @@ func (r Resolver) Color(k ColorKey) Color {
 	}
 }
 
+// FillerBg returns a background a shade off the diff pane, for rows standing in for absent
+// lines. Empty when neither the pane nor the terminal background is known.
+func (r Resolver) FillerBg() Color {
+	base := r.colors.DiffBg
+	if base == "" {
+		base = r.colors.TermBg
+	}
+	return Color(ansiColor(shiftLightness(base, 0.04), 48))
+}
+
 // Style returns the pre-built lipgloss.Style for the given style key.
 // returns an empty lipgloss.Style for unknown keys.
 func (r Resolver) Style(k StyleKey) lipgloss.Style {

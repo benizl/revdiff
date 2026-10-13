@@ -185,6 +185,7 @@ var _ ui.ThemeCatalog = (*themeCatalog)(nil)
 type themeCatalog struct {
 	catalog    *theme.Catalog
 	configPath string
+	termBg     string // detected terminal background, carried into every resolved theme
 }
 
 // Entries returns the ordered list of available themes as UI-facing ThemeEntry values.
@@ -214,8 +215,10 @@ func (tc *themeCatalog) Resolve(name string) (ui.ThemeSpec, bool) {
 	if !ok {
 		return ui.ThemeSpec{}, false
 	}
+	colors := colorsFromTheme(th)
+	colors.TermBg = tc.termBg
 	return ui.ThemeSpec{
-		Colors:      colorsFromTheme(th),
+		Colors:      colors,
 		ChromaStyle: th.ChromaStyle,
 	}, true
 }
@@ -242,6 +245,16 @@ func optsToStyleColors(opts options) style.Colors {
 		StatusFg: c.StatusFg, StatusBg: c.StatusBg,
 		SearchFg: c.SearchFg, SearchBg: c.SearchBg,
 	}
+}
+
+// startupStyleColors is optsToStyleColors plus the terminal background, queried only
+// when the theme leaves the diff pane to it.
+func startupStyleColors(opts options) style.Colors {
+	c := optsToStyleColors(opts)
+	if !opts.NoColors && c.DiffBg == "" {
+		c.TermBg = detectBackgroundHex()
+	}
+	return c
 }
 
 // colorsFromTheme converts a theme.Theme color map to a style.Colors struct.

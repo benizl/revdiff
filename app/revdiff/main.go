@@ -195,7 +195,7 @@ func run(opts options) (int, error) {
 	}
 
 	// construct the three style types per D15: Resolver first, Renderer from Resolver, SGR is zero-value
-	styleColors := optsToStyleColors(opts)
+	styleColors := startupStyleColors(opts)
 	var res style.Resolver
 	if opts.NoColors {
 		res = style.PlainResolver()
@@ -208,6 +208,7 @@ func run(opts options) (int, error) {
 	themes := &themeCatalog{
 		catalog:    theme.NewCatalog(themesDir),
 		configPath: configPath,
+		termBg:     styleColors.TermBg,
 	}
 
 	// Configure the optional post-flush handoff separately from theme settings.

@@ -68,6 +68,7 @@ type styleResolver interface {
 	LineStyle(change diff.ChangeType, highlighted bool) lipgloss.Style
 	WordDiffBg(change diff.ChangeType) style.Color
 	IndicatorBg(change diff.ChangeType) style.Color
+	FillerBg() style.Color
 }
 
 // styleRenderer is what Model needs for compound ANSI rendering operations.
@@ -360,6 +361,7 @@ type modeState struct {
 	compact        bool           // true when diffs are fetched with small context around changes
 	compactContext int            // number of context lines around changes when compact is enabled
 	pageOverlap    int            // rows carried over from the previous screen on page up/down; 0 disables
+	sideBySide     bool           // true when change blocks render old and new side by side
 	vimMotion      bool           // true when the --vim-motion preset is active (gates the vim-motion interceptor in handleKey)
 }
 
@@ -1139,7 +1141,8 @@ func (m Model) dispatchAction(action keymap.Action) (tea.Model, tea.Cmd) {
 	case keymap.ActionMarkReviewed:
 		return m.handleMarkReviewed()
 	case keymap.ActionToggleCollapsed, keymap.ActionToggleCompact, keymap.ActionToggleWrap, keymap.ActionToggleTree,
-		keymap.ActionToggleLineNums, keymap.ActionToggleBlame, keymap.ActionToggleWordDiff, keymap.ActionToggleUntracked:
+		keymap.ActionToggleLineNums, keymap.ActionToggleBlame, keymap.ActionToggleWordDiff, keymap.ActionToggleUntracked,
+		keymap.ActionToggleSideBySide:
 		return m.handleViewToggle(action)
 	case keymap.ActionNextHunk, keymap.ActionPrevHunk:
 		return m.handleHunkNav(action == keymap.ActionNextHunk)
@@ -1474,6 +1477,8 @@ func (m Model) handleViewToggle(action keymap.Action) (tea.Model, tea.Cmd) {
 		return m, cmd
 	case keymap.ActionToggleWordDiff:
 		m.toggleWordDiff()
+	case keymap.ActionToggleSideBySide:
+		m.toggleSideBySide()
 	case keymap.ActionToggleUntracked:
 		cmd := m.toggleUntracked()
 		return m, cmd

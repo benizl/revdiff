@@ -75,6 +75,14 @@ func (m Model) statusBarHeight() int {
 	return 1
 }
 
+// diffLeftCol returns the screen column of the diff pane's first content cell.
+func (m Model) diffLeftCol() int {
+	if m.treePaneHidden() {
+		return 1
+	}
+	return m.layout.treeWidth + 3
+}
+
 // diffTopRow returns the first screen row (0-based y) of diff viewport content.
 // accounts for the pane top border (row 0) and the diff header row (row 1),
 // so the viewport always starts at row 2 regardless of whether the tree pane
@@ -183,7 +191,7 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		case hitTree:
 			return m.clickTree(msg.Y)
 		case hitDiff:
-			return m.clickDiff(msg.Y)
+			return m.clickDiff(msg.X, msg.Y)
 		case hitNone, hitStatus, hitHeader:
 			return m, nil
 		}
@@ -470,12 +478,17 @@ func (m *Model) pinDiffCursorTo(newOffset int) bool {
 // under the pointer. when the click lands on an injected annotation
 // sub-row, cursorOnAnnotation is set so subsequent navigation treats the
 // cursor as being on the annotation rather than the diff line above it.
-func (m Model) clickDiff(y int) (tea.Model, tea.Cmd) {
+func (m Model) clickDiff(x, y int) (tea.Model, tea.Cmd) {
 	if m.file.name == "" {
 		return m, nil // no file loaded — nothing to focus or point at
 	}
 	row := (y - m.diffTopRow()) + m.layout.viewport.YOffset
 	idx, onAnnot := m.visualRowToDiffLine(row)
+	if !onAnnot && m.sideBySideActive() && x >= m.diffLeftCol()+(m.diffContentWidth()+1)/2 {
+		if right := m.sbsRows()[m.sbsLayout(m.buildAnnotationSet()).rowOf[idx]].right; right >= 0 {
+			idx = right
+		}
+	}
 	m.layout.focus = paneDiff
 	m.nav.diffCursor = idx
 	m.annot.cursorOnAnnotation = onAnnot
